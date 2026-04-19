@@ -1,0 +1,107 @@
+// Client-side type definitions — all persistence is in browser localStorage.
+
+import type { DoctorInfo } from './doctors'
+
+export type RecordCategory =
+  | 'prescription'
+  | 'test_result'
+  | 'doctor_opinion'
+  | 'diagnosis'
+  | 'allergy'
+  | 'vitals'
+  | 'note'
+
+export interface MedicalRecord {
+  id: string
+  category: RecordCategory
+  title: string
+  description?: string
+  doctor?: string
+  date: string // ISO yyyy-mm-dd
+  tags: string[] // e.g. ['diabetes','hypertension'] — drive article personalisation
+  createdAt: string // ISO
+}
+
+export type EventKind = 'appointment' | 'test' | 'medication_end' | 'reminder'
+
+export interface CalendarEvent {
+  id: string
+  kind: EventKind
+  title: string
+  notes?: string
+  dateTime: string // ISO
+  location?: string
+  linkedRecordId?: string
+  createdAt: string
+}
+
+export type Severity = 'mild' | 'moderate' | 'severe'
+
+export interface Diagnosis {
+  condition: string
+  severity: Severity
+  confidence: 'low' | 'medium' | 'high'
+  homeRemedies?: string[]
+  otc?: string[]
+  specialty?: string // e.g. "Neurologist" when severe
+  rationale: string
+}
+
+export type ChatRole = 'user' | 'assistant' | 'system'
+
+export interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  ts: string
+  // Structured metadata — used when the message is a triage card rather than free text.
+  card?:
+    | { type: 'question'; symptom: string; question: string; options: string[] }
+    | { type: 'home_care'; diagnosis: Diagnosis }
+    | { type: 'doctor_list'; diagnosis: Diagnosis; doctors: DoctorInfo[] }
+    | { type: 'pharmacy'; mapsQuery: string }
+}
+
+export interface ChatSession {
+  id: string
+  startedAt: string
+  endedAt?: string
+  title: string // auto-generated from first symptom
+  messages: ChatMessage[]
+  symptoms: string[]
+  diagnosis?: Diagnosis
+  status: 'open' | 'home_care' | 'specialist_referred' | 'resolved'
+}
+
+export interface ArticleRef {
+  id: string
+  title: string
+  description: string
+  url: string
+  source: string
+  tag: string
+  targetConditions: string[] // match against record tags
+}
+
+export interface Settings {
+  searchRadiusKm: number
+  patientName: string
+}
+
+export interface Account {
+  email: string
+  name: string
+  // Simple salted hash — not cryptographically strong, but good enough to not
+  // store plaintext for a localStorage-only prototype.
+  passwordHash: string
+  createdAt: string
+}
+
+export interface AppState {
+  settings: Settings
+  records: MedicalRecord[]
+  events: CalendarEvent[]
+  chatSessions: ChatSession[]
+  account: Account | null
+  seeded: boolean
+}

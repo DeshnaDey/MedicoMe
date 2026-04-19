@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+:root {
+  /* Brand teal — matches the reference medical UIs */
+  --teal-50:  #EDF7F6;
+  --teal-100: #D8EEEC;
+  --teal-200: #B7E1DD;
+  --teal-300: #8CCEC8;
+  --teal-400: #5FB8B1;
+  --teal-500: #3FA29C;   /* primary */
+  --teal-600: #2E8B86;
+  --teal-700: #246E6A;
+
+  /* Neutrals — soft, clinical */
+  --bg:          #F4F9F8;
+  --bg-2:        #EAF3F2;
+  --surface:     #FFFFFF;
+  --surface-2:   #F8FBFB;
+  --border:      #E2ECEB;
+  --border-2:    #D4E2E1;
+
+  --text:        #0F1F2C;   /* headlines */
+  --text-2:      #3B4E5B;   /* body */
+  --text-3:      #6E808C;   /* muted */
+  --text-4:      #9AA9B3;   /* placeholder */
+
+  /* States */
+  --danger:  #E4574F;
+  --warn:    #E5A23A;
+  --ok:      #3FA29C;
+}
+
+html, body { background: var(--bg); color: var(--text); }
+
+body {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  letter-spacing: -0.005em;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+
+/* Backgrounds used by pages */
+.page-bg {
+  background:
+    radial-gradient(1200px 600px at 90% -10%, #DCEFEC 0%, transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, #E4F0EF 0%, transparent 60%),
+    linear-gradient(180deg, #F6FBFA 0%, #EDF5F4 100%);
+}
+
+/* Subtle teal grid — used on the chat page so the space feels instrumented,
+   like a medical diagnostic console without being noisy. */
+.chat-grid-bg {
+  background-color: #F6FBFA;
+  background-image:
+    linear-gradient(rgba(63, 162, 156, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 162, 156, 0.09) 1px, transparent 1px),
+    radial-gradient(1200px 600px at 90% -20%, rgba(143, 212, 206, 0.35) 0%, transparent 55%),
+    radial-gradient(900px 500px at -10% 110%, rgba(183, 225, 221, 0.35) 0%, transparent 55%);
+  background-size: 28px 28px, 28px 28px, 100% 100%, 100% 100%;
+  background-position: 0 0, 0 0, 0 0, 0 0;
+}
+
+/* Surfaces */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(15, 31, 44, 0.03), 0 4px 16px -8px rgba(15, 31, 44, 0.06);
+}
+.card-soft {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--teal-500);
+  color: #fff;
+  border: 1px solid var(--teal-500);
+  transition: all 0.18s ease;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--teal-600);
+  border-color: var(--teal-600);
+  box-shadow: 0 6px 18px -6px rgba(63, 162, 156, 0.45);
+  transform: translateY(-1px);
+}
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+  transition: all 0.18s ease;
+}
+.btn-secondary:hover { background: var(--teal-50); color: var(--teal-700); border-color: var(--teal-200); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  transition: all 0.15s;
+}
+.btn-ghost:hover { background: var(--bg-2); color: var(--text); }
+
+/* Inputs */
+.input-field {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.input-field:focus {
+  outline: none;
+  border-color: var(--teal-400);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(63, 162, 156, 0.12);
+}
+.input-field::placeholder { color: var(--text-4); }
+select.input-field option { background: #fff; color: var(--text); }
+
+/* Chips / pills */
+.chip {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  transition: all 0.15s;
+}
+.chip:hover { border-color: var(--teal-300); color: var(--teal-700); background: var(--teal-50); }
+.chip-active {
+  background: var(--teal-500);
+  border-color: var(--teal-500);
+  color: #fff;
+}
+
+/* Chat bubbles */
+.bubble-user {
+  background: var(--teal-500);
+  color: #fff;
+  border-radius: 18px 18px 4px 18px;
+  padding: 10px 14px;
+  max-width: 78%;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+  box-shadow: 0 4px 12px -6px rgba(63, 162, 156, 0.35);
+}
+.bubble-ai {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 18px 18px 18px 4px;
+  padding: 10px 14px;
+  max-width: 82%;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Typing dots */
+.typing-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--teal-400);
+  animation: bounce 1.2s infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+/* Status dots */
+.dot-online  { background: #22C07E; }
+.dot-offline { background: #E4574F; }
+.pulse { animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(63, 162, 156, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(63, 162, 156, 0.45); }
+
+/* Animations */
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.fade-in { animation: fadeIn 0.3s ease forwards; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* Range slider (used on Settings) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--teal-100);
+  border-radius: 9999px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px; height: 18px;
+  background: var(--teal-500);
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(63, 162, 156, 0.35);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px; height: 18px;
+  background: var(--teal-500);
+  border-radius: 50%;
+  border: 3px solid #fff;
+  cursor: pointer;
+}
