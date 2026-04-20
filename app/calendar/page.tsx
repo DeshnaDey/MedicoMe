@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import NavBar from '@/components/NavBar'
 import { addEvent, deleteEvent, useAppState } from '@/lib/store'
+import { useRequireAuth } from '@/lib/auth'
 import type { CalendarEvent, EventKind } from '@/lib/types'
 import {
   Bell,
@@ -42,6 +43,7 @@ function sameDay(a: Date, b: Date) {
 }
 
 function CalendarInner() {
+  useRequireAuth()
   const state = useAppState()
   const params = useSearchParams()
   const [cursor, setCursor] = useState(startOfMonth(new Date()))

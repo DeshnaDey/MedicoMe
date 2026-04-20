@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import NavBar from '@/components/NavBar'
 import { useAppState } from '@/lib/store'
+import { useRequireAuth } from '@/lib/auth'
 import { rankArticles } from '@/lib/articles'
 import {
   Activity,
@@ -38,6 +39,7 @@ const CAT_ICONS: Record<RecordCategory, React.ElementType> = {
 }
 
 export default function DashboardPage() {
+  useRequireAuth()
   const state = useAppState()
 
   const tod = new Date().getHours()

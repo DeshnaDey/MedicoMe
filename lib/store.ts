@@ -64,6 +64,10 @@ function subscribe(listener: () => void) {
 }
 
 // Cached snapshot so getSnapshot is referentially stable until something changes.
+// IMPORTANT: `cachedRaw` must hold the *exact* localStorage string we read on
+// the last call — not a re-serialized snapshot. Otherwise key-order drift from
+// the loadRaw spread makes the strings never match, getSnapshot returns a
+// fresh reference every render, and useSyncExternalStore infinite-loops.
 let cachedSnapshot: AppState | null = null
 let cachedRaw: string | null = null
 function getSnapshot(): AppState {
@@ -73,8 +77,25 @@ function getSnapshot(): AppState {
   }
   const raw = window.localStorage.getItem(KEY)
   if (raw === cachedRaw && cachedSnapshot) return cachedSnapshot
-  cachedSnapshot = loadRaw()
-  cachedRaw = JSON.stringify(cachedSnapshot)
+  // Parse directly — do NOT call loadRaw here, because loadRaw writes the seed
+  // back to localStorage and dispatches a change event, which would re-enter
+  // this code path mid-render and loop.
+  if (raw === null) {
+    cachedSnapshot = buildSeed()
+  } else {
+    try {
+      const parsed = JSON.parse(raw) as AppState
+      const seed = buildSeed()
+      cachedSnapshot = {
+        ...seed,
+        ...parsed,
+        settings: { ...seed.settings, ...(parsed.settings ?? {}) },
+      }
+    } catch {
+      cachedSnapshot = buildSeed()
+    }
+  }
+  cachedRaw = raw
   return cachedSnapshot
 }
 function getServerSnapshot(): AppState {
@@ -95,9 +116,11 @@ function update(mut: (s: AppState) => AppState) {
   const current = loadRaw()
   const next = mut(current)
   saveRaw(next)
-  // Invalidate cached snapshot so next read picks up changes.
+  // Prime the cache with the reference we just returned *and* the exact string
+  // we just wrote to localStorage, so the next getSnapshot hit returns `next`
+  // by identity instead of re-parsing.
   cachedSnapshot = next
-  cachedRaw = JSON.stringify(next)
+  cachedRaw = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null
 }
 
 // Records --------------------------------------------------------------------

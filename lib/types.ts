@@ -11,6 +11,25 @@ export type RecordCategory =
   | 'vitals'
   | 'note'
 
+// Prescriptions can bundle multiple medicines, each with its own dosage and
+// an optional reminder. The reminder, when present, is mirrored into the
+// calendar as one or more CalendarEvents so the dashboard "upcoming" list
+// picks it up automatically.
+export type MedicineFrequency = 'once' | 'daily' | 'twice_daily' | 'weekly'
+
+export interface MedicineReminder {
+  time: string // HH:MM (24h) — e.g. "08:30"
+  startDate: string // yyyy-mm-dd — first date the reminder fires
+  durationDays: number // how many days to keep reminding (1–90)
+  frequency: MedicineFrequency
+}
+
+export interface PrescriptionMedicine {
+  name: string
+  dosage: string // free-form, e.g. "500mg, after meals"
+  reminder?: MedicineReminder
+}
+
 export interface MedicalRecord {
   id: string
   category: RecordCategory
@@ -20,6 +39,7 @@ export interface MedicalRecord {
   date: string // ISO yyyy-mm-dd
   tags: string[] // e.g. ['diabetes','hypertension'] — drive article personalisation
   createdAt: string // ISO
+  medicines?: PrescriptionMedicine[] // populated when category === 'prescription'
 }
 
 export type EventKind = 'appointment' | 'test' | 'medication_end' | 'reminder'

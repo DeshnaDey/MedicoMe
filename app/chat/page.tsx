@@ -251,15 +251,6 @@ export default function ChatPage() {
     appendMessage(s.id, { role: 'user', content: msg })
     scrollBottom()
 
-    if (!state.settings.useOllama) {
-      appendMessage(s.id, {
-        role: 'assistant',
-        content:
-          'Ollama is disabled in Settings — I can only answer symptom chips right now. Enable it, or pick a symptom below.',
-      })
-      return
-    }
-
     setLoading(true)
     try {
       const past = state.chatSessions.filter((cs) => cs.id !== s.id)
@@ -283,24 +274,32 @@ export default function ChatPage() {
         { role: 'user', content: msg },
       ]
 
-      const res = await fetch('/api/chat', {
+      // Call Ollama directly from the browser. Works in dev and when the app
+      // is deployed — as long as the user started Ollama with
+      // `OLLAMA_ORIGINS=*` so their browser can reach localhost:11434 from a
+      // non-localhost origin.
+      const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          model: OLLAMA_MODEL,
           messages: convo,
-          ollamaUrl: state.settings.ollamaUrl,
-          model: state.settings.ollamaModel,
+          stream: false,
         }),
       })
+      if (!res.ok) {
+        throw new Error(`Ollama responded ${res.status}`)
+      }
       const data = await res.json()
-      appendMessage(s.id, {
-        role: 'assistant',
-        content: data.response ?? data.error ?? '(no response)',
-      })
+      const content = data?.message?.content ?? data?.response ?? '(no response)'
+      appendMessage(s.id, { role: 'assistant', content })
     } catch (e) {
+      const reason = e instanceof Error ? e.message : 'unknown error'
       appendMessage(s.id, {
         role: 'assistant',
-        content: `Couldn't reach the AI server. ${e instanceof Error ? e.message : ''}`,
+        content:
+          `Couldn't reach Ollama on your machine (${reason}). ` +
+          `Make sure Ollama is running at ${OLLAMA_URL} and was started with OLLAMA_ORIGINS=* so the browser can talk to it.`,
       })
     } finally {
       setLoading(false)
