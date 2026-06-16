@@ -1,25 +1,44 @@
-// Thin Ollama proxy. The browser sends messages + ollamaUrl + model; we forward
-// to Ollama and return the response. No auth, no DB — all history and medical
-// context live in browser localStorage and are embedded into the messages
-// payload by the client before calling this endpoint.
+import { NextResponse } from 'next/server'
+import { requireUser } from '@/lib/server/session'
+import { chatCompletion, type ChatTurn } from '@/lib/server/ai'
 
-import { NextRequest, NextResponse } from 'next/server'
-import { callOllama, AIMessage } from '@/lib/ai'
+// Server-side AI proxy. The browser used to call Ollama directly, which only
+// worked if every user ran their own local Ollama with OLLAMA_ORIGINS=*. For a
+// shared deployment the key + endpoint live here instead, behind auth.
+//
+// The conversation (system prompt with the user's medical context, prior turns,
+// and the new message) is built client-side in app/chat/page.tsx from data the
+// user already owns, then posted here. We only forward it to the provider — no
+// extra trust is granted.
 
-export async function POST(req: NextRequest) {
+const VALID_ROLES = new Set(['system', 'user', 'assistant'])
+
+export async function POST(req: Request) {
+  const { unauthorized } = await requireUser()
+  if (unauthorized) return unauthorized
+
+  const body = (await req.json().catch(() => null)) as { messages?: unknown } | null
+  const messages = body?.messages
+  if (
+    !Array.isArray(messages) ||
+    messages.length === 0 ||
+    !messages.every(
+      (m): m is ChatTurn =>
+        !!m &&
+        typeof m === 'object' &&
+        VALID_ROLES.has((m as ChatTurn).role) &&
+        typeof (m as ChatTurn).content === 'string'
+    )
+  ) {
+    return NextResponse.json({ error: 'Expected a non-empty `messages` array.' }, { status: 400 })
+  }
+
   try {
-    const body = await req.json()
-    const messages = body.messages as AIMessage[] | undefined
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return NextResponse.json({ error: 'messages[] required' }, { status: 400 })
-    }
-    const { content, provider } = await callOllama(messages, {
-      url: body.ollamaUrl,
-      model: body.model,
-    })
-    return NextResponse.json({ response: content, provider })
+    const content = await chatCompletion(messages)
+    return NextResponse.json({ content })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    const reason = e instanceof Error ? e.message : 'unknown error'
+    // 502: we (the server) failed to get a usable answer from the upstream AI.
+    return NextResponse.json({ error: `AI request failed (${reason}).` }, { status: 502 })
   }
 }

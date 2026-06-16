@@ -10,7 +10,6 @@ import {
 } from '@/lib/store'
 import { findSymptom, SYMPTOMS } from '@/lib/triage'
 import { directionsLink, findDoctorsForSpecialty, phoneLink } from '@/lib/doctors'
-import { OLLAMA_MODEL, OLLAMA_URL } from '@/lib/ai-config'
 import { useRequireAuth } from '@/lib/auth'
 import type { ChatMessage, ChatSession, Diagnosis, MedicalRecord } from '@/lib/types'
 import {
@@ -146,10 +145,14 @@ export default function ChatPage() {
   useEffect(scrollBottom, [session?.messages.length, scrollBottom])
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const startSession = (title: string) => {
-    const s = newChatSession(title)
+  // All store mutations now hit the server — these helpers are async and may
+  // return null if a request fails (e.g. session expired). Callers bail out
+  // quietly rather than throwing.
+  const startSession = async (title: string): Promise<ChatSession | null> => {
+    const s = await newChatSession(title)
+    if (!s) return null
     setSessionId(s.id)
-    appendMessage(s.id, {
+    await appendMessage(s.id, {
       role: 'assistant',
       content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with? Tap one of the chips below, or describe it in your own words.`,
     })
@@ -157,22 +160,24 @@ export default function ChatPage() {
   }
 
   const currentSession = session
-  const ensureSession = () => currentSession ?? startSession('New conversation')
+  const ensureSession = async (): Promise<ChatSession | null> =>
+    currentSession ?? (await startSession('New conversation'))
 
   // Begin rule-based triage flow for a given symptom.
-  const startSymptom = (symptomId: string) => {
+  const startSymptom = async (symptomId: string) => {
     const node = findSymptom(symptomId)
     if (!node) return
-    const s = ensureSession()
-    patchChatSession(s.id, {
+    const s = await ensureSession()
+    if (!s) return
+    await patchChatSession(s.id, {
       title: node.label,
       symptoms: Array.from(new Set([...s.symptoms, node.label])),
       status: 'open',
     })
-    appendMessage(s.id, { role: 'user', content: `I have a ${node.label.toLowerCase()}.` })
+    await appendMessage(s.id, { role: 'user', content: `I have a ${node.label.toLowerCase()}.` })
 
     const first = node.questions[0]
-    appendMessage(s.id, {
+    await appendMessage(s.id, {
       role: 'assistant',
       content: first.prompt,
       card: { type: 'question', symptom: node.label, question: first.prompt, options: first.options },
@@ -182,19 +187,20 @@ export default function ChatPage() {
   }
 
   // Answer a triage question — either advance to next question or finalize.
-  const answerTriage = (answer: string) => {
+  const answerTriage = async (answer: string) => {
     if (mode.kind !== 'triage') return
     const node = findSymptom(mode.symptomId)
     if (!node) return
-    const s = ensureSession()
+    const s = await ensureSession()
+    if (!s) return
     const q = node.questions[mode.qIndex]
-    appendMessage(s.id, { role: 'user', content: answer })
+    await appendMessage(s.id, { role: 'user', content: answer })
     const nextAnswers = { ...mode.answers, [q.key]: answer }
     const nextIndex = mode.qIndex + 1
 
     if (nextIndex < node.questions.length) {
       const nq = node.questions[nextIndex]
-      appendMessage(s.id, {
+      await appendMessage(s.id, {
         role: 'assistant',
         content: nq.prompt,
         card: { type: 'question', symptom: node.label, question: nq.prompt, options: nq.options },
@@ -205,31 +211,31 @@ export default function ChatPage() {
 
     // Final classification.
     const dx = node.classify(nextAnswers)
-    patchChatSession(s.id, {
+    await patchChatSession(s.id, {
       diagnosis: dx,
       status: dx.severity === 'severe' ? 'specialist_referred' : 'home_care',
       endedAt: new Date().toISOString(),
     })
 
-    appendMessage(s.id, {
+    await appendMessage(s.id, {
       role: 'assistant',
       content: `Based on your answers: ${dx.condition} (${dx.severity}).\n${dx.rationale}`,
     })
 
     if (dx.severity === 'severe' && dx.specialty) {
       const doctors = findDoctorsForSpecialty(dx.specialty, state.settings.searchRadiusKm)
-      appendMessage(s.id, {
+      await appendMessage(s.id, {
         role: 'assistant',
         content: `I'd recommend seeing a ${dx.specialty}. Here are a few options near you.`,
         card: { type: 'doctor_list', diagnosis: dx, doctors },
       })
     } else {
-      appendMessage(s.id, {
+      await appendMessage(s.id, {
         role: 'assistant',
         content: 'Here are some home-care suggestions and OTC options.',
         card: { type: 'home_care', diagnosis: dx },
       })
-      appendMessage(s.id, {
+      await appendMessage(s.id, {
         role: 'assistant',
         content: 'Need to pick up OTC meds? I can point you to the nearest pharmacy.',
         card: { type: 'pharmacy', mapsQuery: `pharmacy within ${state.settings.searchRadiusKm}km` },
@@ -244,11 +250,12 @@ export default function ChatPage() {
     if (!msg || loading) return
     setInput('')
 
-    const s = ensureSession()
+    const s = await ensureSession()
+    if (!s) return
     if (!s.title || s.title === 'New conversation') {
-      patchChatSession(s.id, { title: msg.slice(0, 40) })
+      await patchChatSession(s.id, { title: msg.slice(0, 40) })
     }
-    appendMessage(s.id, { role: 'user', content: msg })
+    await appendMessage(s.id, { role: 'user', content: msg })
     scrollBottom()
 
     setLoading(true)
@@ -274,32 +281,26 @@ export default function ChatPage() {
         { role: 'user', content: msg },
       ]
 
-      // Call Ollama directly from the browser. Works in dev and when the app
-      // is deployed — as long as the user started Ollama with
-      // `OLLAMA_ORIGINS=*` so their browser can reach localhost:11434 from a
-      // non-localhost origin.
-      const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+      // Hit our own server-side proxy (same origin, session cookie sent
+      // automatically). The proxy holds the AI key and talks to the provider,
+      // so nothing sensitive is exposed to the browser.
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          messages: convo,
-          stream: false,
-        }),
+        body: JSON.stringify({ messages: convo }),
       })
       if (!res.ok) {
-        throw new Error(`Ollama responded ${res.status}`)
+        const err = await res.json().catch(() => null)
+        throw new Error(err?.error ?? `Server responded ${res.status}`)
       }
       const data = await res.json()
-      const content = data?.message?.content ?? data?.response ?? '(no response)'
-      appendMessage(s.id, { role: 'assistant', content })
+      const content = data?.content ?? '(no response)'
+      await appendMessage(s.id, { role: 'assistant', content })
     } catch (e) {
       const reason = e instanceof Error ? e.message : 'unknown error'
-      appendMessage(s.id, {
+      await appendMessage(s.id, {
         role: 'assistant',
-        content:
-          `Couldn't reach Ollama on your machine (${reason}). ` +
-          `Make sure Ollama is running at ${OLLAMA_URL} and was started with OLLAMA_ORIGINS=* so the browser can talk to it.`,
+        content: `Sorry — I couldn't get a response just now (${reason}). Please try again in a moment.`,
       })
     } finally {
       setLoading(false)
@@ -314,21 +315,25 @@ export default function ChatPage() {
     }
   }
 
-  const newConvo = () => {
-    const s = newChatSession('New conversation')
+  const newConvo = async () => {
+    const s = await newChatSession('New conversation')
+    if (!s) return
     setSessionId(s.id)
     setMode({ kind: 'idle' })
-    appendMessage(s.id, {
+    await appendMessage(s.id, {
       role: 'assistant',
       content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with? Tap one of the chips below, or describe it in your own words.`,
     })
   }
 
-  const removeConvo = (id: string) => {
+  const removeConvo = async (id: string) => {
     if (!confirm('Delete this chat session?')) return
-    deleteChatSession(id)
+    await deleteChatSession(id)
     if (sessionId === id) {
-      setSessionId(state.chatSessions[0]?.id ?? null)
+      // After refresh, state.chatSessions no longer contains `id`; pick the first
+      // remaining session (if any) as the new selection.
+      const remaining = state.chatSessions.filter((cs) => cs.id !== id)
+      setSessionId(remaining[0]?.id ?? null)
     }
   }
 

@@ -191,7 +191,7 @@ function RecordsInner() {
     }))
   }
 
-  const save = (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
 
@@ -209,7 +209,7 @@ function RecordsInner() {
       if (medicines.length === 0) medicines = undefined
     }
 
-    const record = addRecord({
+    const record = await addRecord({
       category: form.category,
       title: form.title.trim(),
       description: form.description.trim() || undefined,
@@ -219,25 +219,34 @@ function RecordsInner() {
       medicines,
     })
 
+    if (!record) {
+      showToast('Could not save record')
+      return
+    }
+
     // For each medicine reminder, mirror into the calendar as events linked
-    // back to this record. Using a separate event per occurrence keeps the
-    // existing calendar rendering logic simple (no recurrence expansion).
+    // back to this record. Fire them in parallel so the UI isn't blocked by
+    // an N-round-trip waterfall.
     let reminderCount = 0
     if (medicines) {
+      const reminderCalls: Promise<unknown>[] = []
       for (const med of medicines) {
         if (!med.reminder) continue
         const times = expandReminderTimes(med.reminder)
         for (const dt of times) {
-          addEvent({
-            kind: 'reminder',
-            title: `${med.name}${med.dosage ? ` — ${med.dosage}` : ''}`,
-            notes: `Medication reminder from prescription: ${record.title}`,
-            dateTime: dt,
-            linkedRecordId: record.id,
-          })
+          reminderCalls.push(
+            addEvent({
+              kind: 'reminder',
+              title: `${med.name}${med.dosage ? ` — ${med.dosage}` : ''}`,
+              notes: `Medication reminder from prescription: ${record.title}`,
+              dateTime: dt,
+              linkedRecordId: record.id,
+            })
+          )
           reminderCount++
         }
       }
+      await Promise.all(reminderCalls)
     }
 
     setShowModal(false)
@@ -249,9 +258,9 @@ function RecordsInner() {
     )
   }
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm('Delete this record? Any medicine reminders linked to it will still appear in the calendar — delete them there if needed.')) return
-    deleteRecord(id)
+    await deleteRecord(id)
     showToast('Record deleted')
   }
 

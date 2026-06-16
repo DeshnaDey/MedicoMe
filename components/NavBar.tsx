@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
@@ -32,11 +33,15 @@ export default function NavBar() {
         }}
       >
         <Link href="/dashboard" className="flex items-center gap-2 font-display text-[22px] tracking-tight" style={{ color: 'var(--text)' }}>
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg" style={{ background: 'var(--teal-500)' }}>
-            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v6M12 16v6M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M16 12h6M4.93 19.07l4.24-4.24M14.83 9.17l4.24-4.24" />
-            </svg>
-          </span>
+          <Image
+            src="/logo.png"
+            alt=""
+            width={36}
+            height={36}
+            className="w-9 h-9"
+            style={{ imageRendering: 'pixelated' }}
+            priority
+          />
           <span>Medico<span style={{ color: 'var(--teal-500)' }}>Me</span></span>
         </Link>
 

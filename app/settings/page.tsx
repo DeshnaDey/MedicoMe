@@ -31,8 +31,8 @@ export default function SettingsPage() {
     showToast('All data cleared')
   }
 
-  const signOut = () => {
-    logout()
+  const signOut = async () => {
+    await logout()
     router.replace('/login')
   }
 

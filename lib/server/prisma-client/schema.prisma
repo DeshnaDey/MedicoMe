@@ -1,0 +1,159 @@
+// Medico Me — Postgres schema (Supabase-hosted in prod).
+//
+// All rows are scoped to a User. There's no RBAC — a user only ever sees
+// their own data, enforced by the session cookie + `where: { userId }` in
+// every API handler. Keep that invariant when adding new endpoints.
+//
+// JSON columns store arrays/objects that don't need to be queried
+// relationally (tag lists, structured chat message cards, diagnosis blobs).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/server/prisma-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime (Vercel serverless) uses the pooled connection (Supabase pgbouncer,
+  // port 6543) to avoid exhausting Postgres connections under concurrency.
+  url       = env("DATABASE_URL")
+  // Migrations need a direct connection (port 5432) — pgbouncer can't run them.
+  // Falls back to DATABASE_URL locally if DIRECT_URL is unset.
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  settings     Settings?
+  records      MedicalRecord[]
+  events       CalendarEvent[]
+  chatSessions ChatSession[]
+}
+
+model Settings {
+  id             String @id @default(cuid())
+  userId         String @unique
+  user           User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  searchRadiusKm Int    @default(5)
+  patientName    String @default("")
+}
+
+enum RecordCategory {
+  prescription
+  test_result
+  doctor_opinion
+  diagnosis
+  allergy
+  vitals
+  note
+}
+
+model MedicalRecord {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    RecordCategory
+  title       String
+  description String?
+  doctor      String?
+  date        String // yyyy-mm-dd, kept as string to avoid tz confusion
+  tags        Json // string[]
+  createdAt   DateTime       @default(now())
+
+  medicines PrescriptionMedicine[]
+  events    CalendarEvent[]
+
+  @@index([userId, createdAt])
+}
+
+enum MedicineFrequency {
+  once
+  daily
+  twice_daily
+  weekly
+}
+
+model PrescriptionMedicine {
+  id                   String             @id @default(cuid())
+  recordId             String
+  record               MedicalRecord      @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  name                 String
+  dosage               String
+  // Reminder settings are flattened into this model — a medicine has at most
+  // one reminder spec, and the actual firings are materialised as CalendarEvents.
+  reminderTime         String? // HH:MM
+  reminderStartDate    String? // yyyy-mm-dd
+  reminderDurationDays Int?
+  reminderFrequency    MedicineFrequency?
+
+  @@index([recordId])
+}
+
+enum EventKind {
+  appointment
+  test
+  medication_end
+  reminder
+}
+
+model CalendarEvent {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind           EventKind
+  title          String
+  notes          String?
+  dateTime       DateTime
+  location       String?
+  linkedRecordId String?
+  linkedRecord   MedicalRecord? @relation(fields: [linkedRecordId], references: [id], onDelete: SetNull)
+  createdAt      DateTime       @default(now())
+
+  @@index([userId, dateTime])
+}
+
+enum ChatSessionStatus {
+  open
+  home_care
+  specialist_referred
+  resolved
+}
+
+model ChatSession {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  startedAt DateTime          @default(now())
+  endedAt   DateTime?
+  symptoms  Json // string[]
+  diagnosis Json? // Diagnosis | null
+  status    ChatSessionStatus @default(open)
+
+  messages ChatMessage[]
+
+  @@index([userId, startedAt])
+}
+
+enum ChatRole {
+  user
+  assistant
+  system
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String
+  ts        DateTime    @default(now())
+  card      Json? // { type: 'question'|'home_care'|'doctor_list'|'pharmacy', ... }
+
+  @@index([sessionId, ts])
+}

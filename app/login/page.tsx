@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { login, signup, useAppState } from '@/lib/store'
-import { HeartPulse, Lock, Mail, User as UserIcon } from 'lucide-react'
+import { Lock, Mail, User as UserIcon } from 'lucide-react'
 
 type Tab = 'login' | 'signup'
 
@@ -36,13 +37,13 @@ export default function LoginPage() {
     setSubmitting(true)
     try {
       if (tab === 'signup') {
-        const result = signup({ name, email, password })
+        const result = await signup({ name, email, password })
         if (!result.ok) {
           setError(result.error)
           return
         }
       } else {
-        const result = login({ email, password })
+        const result = await login({ email, password })
         if (!result.ok) {
           setError(result.error)
           return
@@ -72,12 +73,15 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          <span
-            className="flex items-center justify-center w-11 h-11 rounded-2xl"
-            style={{ background: 'var(--teal-500)', color: '#fff' }}
-          >
-            <HeartPulse className="w-5 h-5" strokeWidth={2} />
-          </span>
+          <Image
+            src="/logo.png"
+            alt=""
+            width={56}
+            height={56}
+            className="w-14 h-14"
+            style={{ imageRendering: 'pixelated' }}
+            priority
+          />
           <h1 className="font-display text-[26px]" style={{ color: 'var(--text)' }}>Medico Me</h1>
         </div>
 

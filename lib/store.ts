@@ -1,248 +1,215 @@
-// Client-side localStorage store. All persistence for the prototype lives here.
-// Provides: getState(), setState(), a small pub-sub for components, and helpers
-// for the common CRUD operations on records / events / chat sessions / settings.
+// Client-side store. Data lives in Postgres; this module is the thin wrapper
+// that fetches it (via SWR) and exposes mutation helpers that POST/PATCH/DELETE
+// to the API routes. The `useAppState()` hook keeps the same shape it had in
+// the localStorage era, so pages don't need to care whether the source is
+// local or server.
 
 'use client'
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import useSWR, { mutate as globalMutate } from 'swr'
 import type {
-  Account,
   AppState,
-  MedicalRecord,
   CalendarEvent,
-  ChatSession,
   ChatMessage,
+  ChatSession,
+  MedicalRecord,
+  PrescriptionMedicine,
   Settings,
 } from './types'
-import { buildSeed } from './seed'
-import { hashPassword } from './auth'
 
-const KEY = 'medico_me_state_v1'
+const STATE_KEY = '/api/state'
 
-function genId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+// Fallback used on the server and during initial client render before SWR has
+// any data. Empty but shape-compatible, so destructuring in components never
+// throws.
+const FALLBACK: AppState = {
+  account: null,
+  settings: { searchRadiusKm: 5, patientName: '' },
+  records: [],
+  events: [],
+  chatSessions: [],
+  seeded: false,
 }
 
-function loadRaw(): AppState {
-  if (typeof window === 'undefined') return buildSeed()
-  try {
-    const raw = window.localStorage.getItem(KEY)
-    if (!raw) {
-      const seeded = buildSeed()
-      window.localStorage.setItem(KEY, JSON.stringify(seeded))
-      return seeded
-    }
-    const parsed = JSON.parse(raw) as AppState
-    // Defensive: fill missing keys if schema evolved
-    return {
-      ...buildSeed(),
-      ...parsed,
-      settings: { ...buildSeed().settings, ...(parsed.settings ?? {}) },
-    }
-  } catch {
-    return buildSeed()
-  }
+async function fetcher(url: string): Promise<AppState> {
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
+  return (await res.json()) as AppState
 }
 
-function saveRaw(state: AppState) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(KEY, JSON.stringify(state))
-  // Same-tab storage event for cross-component reactivity
-  window.dispatchEvent(new Event('medicome:state'))
-}
-
-// ─── Subscription plumbing for useSyncExternalStore ─────────────────────────
-function subscribe(listener: () => void) {
-  if (typeof window === 'undefined') return () => {}
-  const onStorage = () => listener()
-  window.addEventListener('storage', onStorage)
-  window.addEventListener('medicome:state', onStorage)
-  return () => {
-    window.removeEventListener('storage', onStorage)
-    window.removeEventListener('medicome:state', onStorage)
-  }
-}
-
-// Cached snapshot so getSnapshot is referentially stable until something changes.
-// IMPORTANT: `cachedRaw` must hold the *exact* localStorage string we read on
-// the last call — not a re-serialized snapshot. Otherwise key-order drift from
-// the loadRaw spread makes the strings never match, getSnapshot returns a
-// fresh reference every render, and useSyncExternalStore infinite-loops.
-let cachedSnapshot: AppState | null = null
-let cachedRaw: string | null = null
-function getSnapshot(): AppState {
-  if (typeof window === 'undefined') {
-    if (!cachedSnapshot) cachedSnapshot = buildSeed()
-    return cachedSnapshot
-  }
-  const raw = window.localStorage.getItem(KEY)
-  if (raw === cachedRaw && cachedSnapshot) return cachedSnapshot
-  // Parse directly — do NOT call loadRaw here, because loadRaw writes the seed
-  // back to localStorage and dispatches a change event, which would re-enter
-  // this code path mid-render and loop.
-  if (raw === null) {
-    cachedSnapshot = buildSeed()
-  } else {
-    try {
-      const parsed = JSON.parse(raw) as AppState
-      const seed = buildSeed()
-      cachedSnapshot = {
-        ...seed,
-        ...parsed,
-        settings: { ...seed.settings, ...(parsed.settings ?? {}) },
-      }
-    } catch {
-      cachedSnapshot = buildSeed()
-    }
-  }
-  cachedRaw = raw
-  return cachedSnapshot
-}
-function getServerSnapshot(): AppState {
-  if (!cachedSnapshot) cachedSnapshot = buildSeed()
-  return cachedSnapshot
-}
-
+// Public hook — the signature matches the previous localStorage version so
+// pages keep working unchanged.
 export function useAppState(): AppState {
-  // Hydrate-safely: start with seed on server/initial, update to real after mount.
-  const snap = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  const [hydrated, setHydrated] = useState(false)
-  useEffect(() => setHydrated(true), [])
-  return hydrated ? snap : getServerSnapshot()
+  const { data } = useSWR<AppState>(STATE_KEY, fetcher, {
+    revalidateOnFocus: true,
+    // Don't thrash the DB: SWR will still revalidate on focus and after
+    // mutations, but don't poll aimlessly on a stale tab.
+    refreshInterval: 0,
+  })
+  return data ?? FALLBACK
 }
 
-// ─── Mutations ─────────────────────────────────────────────────────────────
-function update(mut: (s: AppState) => AppState) {
-  const current = loadRaw()
-  const next = mut(current)
-  saveRaw(next)
-  // Prime the cache with the reference we just returned *and* the exact string
-  // we just wrote to localStorage, so the next getSnapshot hit returns `next`
-  // by identity instead of re-parsing.
-  cachedSnapshot = next
-  cachedRaw = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null
+// Revalidate the aggregated state blob. Every mutation helper calls this so
+// the UI picks up the change without a full page reload.
+function refresh() {
+  return globalMutate(STATE_KEY)
 }
 
-// Records --------------------------------------------------------------------
-export function addRecord(input: Omit<MedicalRecord, 'id' | 'createdAt'>): MedicalRecord {
-  const record: MedicalRecord = { ...input, id: genId('rec'), createdAt: new Date().toISOString() }
-  update((s) => ({ ...s, records: [record, ...s.records] }))
-  return record
-}
-export function updateRecord(id: string, patch: Partial<MedicalRecord>) {
-  update((s) => ({ ...s, records: s.records.map((r) => (r.id === id ? { ...r, ...patch } : r)) }))
-}
-export function deleteRecord(id: string) {
-  update((s) => ({ ...s, records: s.records.filter((r) => r.id !== id) }))
-}
-
-// Events ---------------------------------------------------------------------
-export function addEvent(input: Omit<CalendarEvent, 'id' | 'createdAt'>): CalendarEvent {
-  const event: CalendarEvent = { ...input, id: genId('evt'), createdAt: new Date().toISOString() }
-  update((s) => ({ ...s, events: [...s.events, event].sort((a, b) => a.dateTime.localeCompare(b.dateTime)) }))
-  return event
-}
-export function updateEvent(id: string, patch: Partial<CalendarEvent>) {
-  update((s) => ({ ...s, events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)) }))
-}
-export function deleteEvent(id: string) {
-  update((s) => ({ ...s, events: s.events.filter((e) => e.id !== id) }))
-}
-
-// Settings -------------------------------------------------------------------
-export function updateSettings(patch: Partial<Settings>) {
-  update((s) => ({ ...s, settings: { ...s.settings, ...patch } }))
-}
-
-// Chat sessions --------------------------------------------------------------
-export function newChatSession(title: string): ChatSession {
-  const session: ChatSession = {
-    id: genId('cs'),
-    startedAt: new Date().toISOString(),
-    title,
-    messages: [],
-    symptoms: [],
-    status: 'open',
-  }
-  update((s) => ({ ...s, chatSessions: [session, ...s.chatSessions] }))
-  return session
-}
-export function appendMessage(sessionId: string, msg: Omit<ChatMessage, 'id' | 'ts'>) {
-  const full: ChatMessage = { ...msg, id: genId('m'), ts: new Date().toISOString() }
-  update((s) => ({
-    ...s,
-    chatSessions: s.chatSessions.map((cs) =>
-      cs.id === sessionId ? { ...cs, messages: [...cs.messages, full] } : cs
-    ),
-  }))
-  return full
-}
-export function patchChatSession(sessionId: string, patch: Partial<ChatSession>) {
-  update((s) => ({
-    ...s,
-    chatSessions: s.chatSessions.map((cs) => (cs.id === sessionId ? { ...cs, ...patch } : cs)),
-  }))
-}
-export function deleteChatSession(sessionId: string) {
-  update((s) => ({ ...s, chatSessions: s.chatSessions.filter((cs) => cs.id !== sessionId) }))
-}
-
-// Account / auth -------------------------------------------------------------
-// localStorage-only auth: we store a hashed password with the account so the
-// password itself never sits in plaintext. The "login" check recomputes the
-// hash with the same salt and compares — no server involved.
-
+// ─── Auth ──────────────────────────────────────────────────────────────────
 export type SignupResult = { ok: true } | { ok: false; error: string }
 export type LoginResult = { ok: true } | { ok: false; error: string }
 
-export function signup(input: { name: string; email: string; password: string }): SignupResult {
-  const email = input.email.trim().toLowerCase()
-  const name = input.name.trim()
-  if (!name) return { ok: false, error: 'Please enter your name.' }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'That email looks invalid.' }
-  if (input.password.length < 6) return { ok: false, error: 'Password must be at least 6 characters.' }
-
-  const current = loadRaw()
-  if (current.account) {
-    return { ok: false, error: 'An account already exists on this device. Sign out first to make a new one.' }
-  }
-  const account: Account = {
-    email,
-    name,
-    passwordHash: hashPassword(input.password, email),
-    createdAt: new Date().toISOString(),
-  }
-  update((s) => ({
-    ...s,
-    account,
-    // Seed the patient name so the dashboard greets them by first name.
-    settings: { ...s.settings, patientName: s.settings.patientName || name },
-  }))
+export async function signup(input: {
+  name: string
+  email: string
+  password: string
+}): Promise<SignupResult> {
+  const res = await fetch('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: data.error ?? 'Something went wrong.' }
+  await refresh()
   return { ok: true }
 }
 
-export function login(input: { email: string; password: string }): LoginResult {
-  const email = input.email.trim().toLowerCase()
-  const state = loadRaw()
-  if (!state.account) return { ok: false, error: 'No account found on this device. Create one first.' }
-  if (state.account.email !== email) return { ok: false, error: 'No account with that email.' }
-  const expected = hashPassword(input.password, email)
-  if (expected !== state.account.passwordHash) return { ok: false, error: 'Incorrect password.' }
-  // Explicitly re-save to notify subscribers even though nothing changed.
-  update((s) => ({ ...s, account: s.account }))
+export async function login(input: {
+  email: string
+  password: string
+}): Promise<LoginResult> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: data.error ?? 'Something went wrong.' }
+  await refresh()
   return { ok: true }
 }
 
-export function logout() {
-  // Logging out clears the account pointer but keeps records/events intact, so
-  // a returning user can sign back in and see their data again.
-  update((s) => ({ ...s, account: null }))
+export async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+  await refresh()
 }
 
-// Wipe --------------------------------------------------------------
-export function resetToSeed() {
-  const fresh = buildSeed()
-  saveRaw(fresh)
-  cachedSnapshot = fresh
-  cachedRaw = JSON.stringify(fresh)
+// ─── Records ───────────────────────────────────────────────────────────────
+export async function addRecord(
+  input: Omit<MedicalRecord, 'id' | 'createdAt'>
+): Promise<MedicalRecord | null> {
+  const res = await fetch('/api/records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) return null
+  const { record } = (await res.json()) as { record: MedicalRecord }
+  await refresh()
+  return record
+}
+
+export async function deleteRecord(id: string) {
+  await fetch(`/api/records/${id}`, { method: 'DELETE', credentials: 'include' })
+  await refresh()
+}
+
+// `updateRecord` was on the old API but nothing in the UI calls it. Left as
+// a TODO — if/when records become editable, add an API route and wire it here.
+export async function updateRecord(_id: string, _patch: Partial<MedicalRecord>) {
+  throw new Error('updateRecord is not implemented on the server yet.')
+}
+
+// ─── Events ────────────────────────────────────────────────────────────────
+export async function addEvent(
+  input: Omit<CalendarEvent, 'id' | 'createdAt'>
+): Promise<CalendarEvent | null> {
+  const res = await fetch('/api/events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) return null
+  const { event } = (await res.json()) as { event: CalendarEvent }
+  await refresh()
+  return event
+}
+
+export async function deleteEvent(id: string) {
+  await fetch(`/api/events/${id}`, { method: 'DELETE', credentials: 'include' })
+  await refresh()
+}
+
+export async function updateEvent(_id: string, _patch: Partial<CalendarEvent>) {
+  throw new Error('updateEvent is not implemented on the server yet.')
+}
+
+// ─── Settings ──────────────────────────────────────────────────────────────
+export async function updateSettings(patch: Partial<Settings>) {
+  await fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(patch),
+  })
+  await refresh()
+}
+
+// ─── Chat sessions ─────────────────────────────────────────────────────────
+export async function newChatSession(title: string): Promise<ChatSession | null> {
+  const res = await fetch('/api/chat/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) return null
+  const { session } = (await res.json()) as { session: ChatSession }
+  await refresh()
+  return session
+}
+
+export async function appendMessage(
+  sessionId: string,
+  msg: Omit<ChatMessage, 'id' | 'ts'>
+): Promise<ChatMessage | null> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(msg),
+  })
+  if (!res.ok) return null
+  const { message } = (await res.json()) as { message: ChatMessage }
+  await refresh()
+  return message
+}
+
+export async function patchChatSession(sessionId: string, patch: Partial<ChatSession>) {
+  await fetch(`/api/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(patch),
+  })
+  await refresh()
+}
+
+export async function deleteChatSession(sessionId: string) {
+  await fetch(`/api/chat/sessions/${sessionId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  await refresh()
+}
+
+// ─── Wipe ──────────────────────────────────────────────────────────────────
+export async function resetToSeed() {
+  await fetch('/api/reset', { method: 'POST', credentials: 'include' })
+  await refresh()
 }
