@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 
@@ -12,9 +12,40 @@ const inter = Inter({
   display: 'swap',
 })
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://medico-me.vercel.app'
+const DESCRIPTION =
+  'Medico Me is your personal health companion: keep your medical records in one place, ' +
+  'track appointments, and run a quick AI-assisted symptom check. Not a substitute for professional care.'
+
 export const metadata: Metadata = {
-  title: 'Medico Me — Medical Assistant',
-  description: 'Your personal AI-powered medical records assistant',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Medico Me — Your personal medical assistant',
+    template: '%s · Medico Me',
+  },
+  description: DESCRIPTION,
+  applicationName: 'Medico Me',
+  keywords: ['medical records', 'health assistant', 'symptom checker', 'personal health', 'triage'],
+  authors: [{ name: 'Medico Me' }],
+  openGraph: {
+    type: 'website',
+    siteName: 'Medico Me',
+    title: 'Medico Me — Your personal medical assistant',
+    description: DESCRIPTION,
+    url: SITE_URL,
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Medico Me — Your personal medical assistant',
+    description: DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#3FA29C',
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

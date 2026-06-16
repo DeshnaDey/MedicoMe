@@ -218,3 +218,36 @@ input[type="range"]::-moz-range-thumb {
   border: 3px solid #fff;
   cursor: pointer;
 }
+
+/* ── Footer + legal pages ───────────────────────────────────────────────── */
+.footer-link {
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.footer-link:hover { color: var(--teal-600); }
+
+/* Lightweight prose styling for the privacy / terms / disclaimer pages, so
+   they read like real legal docs without pulling in a typography plugin. */
+.legal-prose { color: var(--text-2); font-size: 0.95rem; line-height: 1.7; }
+.legal-prose h2 {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 2rem 0 0.6rem;
+  letter-spacing: -0.01em;
+}
+.legal-prose h2:first-child { margin-top: 0; }
+.legal-prose p { margin: 0.6rem 0; }
+.legal-prose ul { margin: 0.6rem 0; padding-left: 1.1rem; list-style: disc; }
+.legal-prose li { margin: 0.3rem 0; }
+.legal-prose strong { color: var(--text); font-weight: 600; }
+.legal-prose a { color: var(--teal-600); text-decoration: underline; }
+.legal-prose code {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.85em;
+}

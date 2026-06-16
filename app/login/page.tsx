@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import Link from 'next/link'
 import { login, signup, useAppState } from '@/lib/store'
 import { Lock, Mail, User as UserIcon } from 'lucide-react'
+import SiteFooter from '@/components/SiteFooter'
 
 type Tab = 'login' | 'signup'
 
@@ -62,7 +64,7 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5 py-10"
+      className="min-h-screen flex flex-col px-5"
       style={{
         backgroundColor: '#F6FBFA',
         backgroundImage:
@@ -70,6 +72,7 @@ export default function LoginPage() {
           'radial-gradient(800px 450px at -10% 110%, rgba(183, 225, 221, 0.35) 0%, transparent 55%)',
       }}
     >
+      <div className="flex-1 flex items-center justify-center py-10">
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="flex items-center justify-center gap-2 mb-8">
@@ -123,7 +126,7 @@ export default function LoginPage() {
           <p className="text-sm mb-5" style={{ color: 'var(--text-3)' }}>
             {tab === 'login'
               ? 'Welcome back. Sign in to access your records.'
-              : 'Your data lives only on this device — no server stores your password.'}
+              : 'Create an account to securely store your records and access them from any device.'}
           </p>
 
           <form onSubmit={onSubmit} className="space-y-4">
@@ -207,11 +210,25 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="text-[11px] text-center mt-5" style={{ color: 'var(--text-4)' }}>
-            Medico Me stores your account and records only in your browser. Clearing site data will erase them.
+          {tab === 'signup' && (
+            <p className="text-[11px] text-center mt-5 leading-relaxed" style={{ color: 'var(--text-4)' }}>
+              By creating an account you agree to our{' '}
+              <Link href="/terms" className="footer-link" style={{ color: 'var(--text-3)', textDecoration: 'underline' }}>Terms</Link>
+              {' '}and{' '}
+              <Link href="/privacy" className="footer-link" style={{ color: 'var(--text-3)', textDecoration: 'underline' }}>Privacy Policy</Link>.
+            </p>
+          )}
+
+          <p className="text-[11px] text-center mt-4 leading-relaxed" style={{ color: 'var(--text-4)' }}>
+            Medico Me offers general health information, not medical advice. In an emergency, call your
+            local emergency number. See our{' '}
+            <Link href="/disclaimer" className="footer-link" style={{ color: 'var(--text-3)', textDecoration: 'underline' }}>Medical Disclaimer</Link>.
           </p>
         </div>
       </div>
+      </div>
+
+      <SiteFooter />
     </div>
   )
 }
