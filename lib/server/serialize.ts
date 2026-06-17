@@ -24,10 +24,13 @@ import type {
   Settings,
 } from '../types'
 
-export function serializeAccount(u: Pick<DbUser, 'email' | 'name' | 'createdAt'>): Account {
+export function serializeAccount(
+  u: Pick<DbUser, 'email' | 'name' | 'createdAt'> & { phone?: string | null }
+): Account {
   return {
     email: u.email,
     name: u.name,
+    phone: u.phone ?? undefined,
     // The client Account shape still includes passwordHash for historical
     // reasons, but we never send it. Coerce to empty string so TS stays happy.
     passwordHash: '',

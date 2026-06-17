@@ -84,26 +84,9 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {stats.map(({ label, val, sub, Icon }) => (
-            <div key={label} className="card rounded-2xl p-5">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.08em]" style={{ color: 'var(--text-3)' }}>{label}</p>
-                  <p className="font-display text-[32px] mt-1.5" style={{ color: 'var(--text)' }}>{val}</p>
-                </div>
-                <span className="flex items-center justify-center w-9 h-9 rounded-xl" style={{ background: 'var(--teal-50)', color: 'var(--teal-600)' }}>
-                  <Icon className="w-4 h-4" strokeWidth={1.8} />
-                </span>
-              </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>{sub}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Quick actions + Upcoming */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        {/* Quick actions + Upcoming — surfaced first so the most actionable
+            things (start a check, what's coming up) sit at the top. */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
           <div className="card rounded-2xl p-5">
             <h3 className="font-display text-[18px] mb-4" style={{ color: 'var(--text)' }}>Quick actions</h3>
             <div className="space-y-2.5">
@@ -160,6 +143,24 @@ export default function DashboardPage() {
               })
             )}
           </div>
+        </div>
+
+        {/* At-a-glance counts */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          {stats.map(({ label, val, sub, Icon }) => (
+            <div key={label} className="card rounded-2xl p-5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.08em]" style={{ color: 'var(--text-3)' }}>{label}</p>
+                  <p className="font-display text-[32px] mt-1.5" style={{ color: 'var(--text)' }}>{val}</p>
+                </div>
+                <span className="flex items-center justify-center w-9 h-9 rounded-xl" style={{ background: 'var(--teal-50)', color: 'var(--teal-600)' }}>
+                  <Icon className="w-4 h-4" strokeWidth={1.8} />
+                </span>
+              </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>{sub}</p>
+            </div>
+          ))}
         </div>
 
         {/* Recent records + For you */}

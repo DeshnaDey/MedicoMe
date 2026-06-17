@@ -114,6 +114,7 @@ export interface Settings {
 export interface Account {
   email: string
   name: string
+  phone?: string
   // Simple salted hash — not cryptographically strong, but good enough to not
   // store plaintext for a localStorage-only prototype.
   passwordHash: string

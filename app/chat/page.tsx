@@ -8,7 +8,7 @@ import {
   patchChatSession,
   useAppState,
 } from '@/lib/store'
-import { findSymptom, SYMPTOMS } from '@/lib/triage'
+import { findSymptom } from '@/lib/triage'
 import { directionsLink, findDoctorsForSpecialty, phoneLink } from '@/lib/doctors'
 import { useRequireAuth } from '@/lib/auth'
 import { interpretTriage } from '@/lib/triage-ai'
@@ -18,36 +18,19 @@ import {
   CalendarCheck,
   Check,
   CheckCircle2,
-  Flame,
-  HeartPulse,
-  Leaf,
   MapPin,
   Menu,
-  MessageCircle,
   Phone,
   Pill,
   Plus,
   Send,
   Stethoscope,
-  Thermometer,
   Trash2,
-  Wind,
 } from 'lucide-react'
 
 type Mode =
   | { kind: 'idle' }
   | { kind: 'triage'; symptomId: string; answers: Record<string, string>; qIndex: number }
-
-// Icon lookup for each symptom — replaces the old emoji field.
-const SYMPTOM_ICON: Record<string, React.ElementType> = {
-  headache: Flame,
-  cough: Wind,
-  stomach_ache: Pill,
-  sore_throat: MessageCircle,
-  chest_pain: HeartPulse,
-  rash: Leaf,
-  fever: Thermometer,
-}
 
 // Build a dense history blurb for the Ollama system prompt so the LLM has proper
 // longitudinal context across sessions.
@@ -181,29 +164,6 @@ export default function ChatPage() {
   const currentSession = session
   const ensureSession = async (): Promise<ChatSession | null> =>
     currentSession ?? (await startSession('New conversation'))
-
-  // Begin rule-based triage flow for a given symptom.
-  const startSymptom = async (symptomId: string) => {
-    const node = findSymptom(symptomId)
-    if (!node) return
-    const s = await ensureSession()
-    if (!s) return
-    await patchChatSession(s.id, {
-      title: node.label,
-      symptoms: Array.from(new Set([...s.symptoms, node.label])),
-      status: 'open',
-    })
-    await appendMessage(s.id, { role: 'user', content: `I have a ${node.label.toLowerCase()}.` })
-
-    const first = node.questions[0]
-    await appendMessage(s.id, {
-      role: 'assistant',
-      content: first.prompt,
-      card: { type: 'question', symptom: node.label, question: first.prompt, options: first.options },
-    })
-    setMode({ kind: 'triage', symptomId, answers: {}, qIndex: 0 })
-    scrollBottom()
-  }
 
   // Answer a triage question — either advance to next question or finalize.
   const answerTriage = async (answer: string) => {
@@ -458,28 +418,6 @@ export default function ChatPage() {
             <Plus className="w-4 h-4" strokeWidth={2.2} />
             New chat
           </button>
-
-          <p className="text-[10px] uppercase tracking-[0.08em] mb-2" style={{ color: 'var(--text-3)' }}>Symptoms</p>
-          <div className="grid grid-cols-2 gap-2 mb-5">
-            {SYMPTOMS.map((s) => {
-              const Icon = SYMPTOM_ICON[s.id] ?? Stethoscope
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => startSymptom(s.id)}
-                  className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg transition-all text-left"
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border-2)',
-                    color: 'var(--text-2)',
-                  }}
-                >
-                  <Icon className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.8} style={{ color: 'var(--teal-600)' }} />
-                  <span className="truncate">{s.label}</span>
-                </button>
-              )
-            })}
-          </div>
 
           <p className="text-[10px] uppercase tracking-[0.08em] mb-2" style={{ color: 'var(--text-3)' }}>Past sessions</p>
           <div className="space-y-1.5 flex-1">

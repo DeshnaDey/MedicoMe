@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import { login, signup, useAppState } from '@/lib/store'
-import { Lock, Mail, User as UserIcon } from 'lucide-react'
+import { Lock, Mail, Phone, User as UserIcon } from 'lucide-react'
 import SiteFooter from '@/components/SiteFooter'
 
 type Tab = 'login' | 'signup'
@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [tab, setTab] = useState<Tab>('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -39,7 +40,7 @@ export default function LoginPage() {
     setSubmitting(true)
     try {
       if (tab === 'signup') {
-        const result = await signup({ name, email, password })
+        const result = await signup({ name, email, phone, password })
         if (!result.ok) {
           setError(result.error)
           return
@@ -164,6 +165,25 @@ export default function LoginPage() {
                 />
               </div>
             </div>
+            {tab === 'signup' && (
+              <div>
+                <label className="block text-[11px] mb-1.5 uppercase tracking-[0.08em]" style={{ color: 'var(--text-3)' }}>
+                  Phone
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-4)' }} strokeWidth={1.8} />
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+1 555 123 4567"
+                    className="input-field w-full pl-10 pr-4 py-3 rounded-xl text-sm"
+                    autoComplete="tel"
+                    required
+                  />
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] mb-1.5 uppercase tracking-[0.08em]" style={{ color: 'var(--text-3)' }}>
                 Password

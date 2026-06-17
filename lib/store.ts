@@ -62,6 +62,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string }
 export async function signup(input: {
   name: string
   email: string
+  phone: string
   password: string
 }): Promise<SignupResult> {
   const res = await fetch('/api/auth/signup', {
