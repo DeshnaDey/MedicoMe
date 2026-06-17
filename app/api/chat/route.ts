@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/server/session'
-import { chatCompletion, type ChatTurn } from '@/lib/server/ai'
+import { chatCompletion, TRIAGE_SCHEMA, type ChatTurn } from '@/lib/server/ai'
 
 // Server-side AI proxy. The browser used to call Ollama directly, which only
 // worked if every user ran their own local Ollama with OLLAMA_ORIGINS=*. For a
@@ -17,8 +17,11 @@ export async function POST(req: Request) {
   const { unauthorized } = await requireUser()
   if (unauthorized) return unauthorized
 
-  const body = (await req.json().catch(() => null)) as { messages?: unknown } | null
+  const body = (await req.json().catch(() => null)) as
+    | { messages?: unknown; structured?: boolean }
+    | null
   const messages = body?.messages
+  const structured = body?.structured === true
   if (
     !Array.isArray(messages) ||
     messages.length === 0 ||
@@ -34,6 +37,28 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (structured) {
+      // The triage flow expects a JSON object it can render as cards. Use the
+      // schema to constrain decoding; reasoning models occasionally still emit
+      // empty/garbled output, so retry once before falling back.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const raw = await chatCompletion(messages, { schema: TRIAGE_SCHEMA })
+        if (raw && raw.trim()) {
+          try {
+            const data = JSON.parse(raw)
+            if (data && typeof data === 'object' && 'type' in data) {
+              return NextResponse.json({ data })
+            }
+          } catch {
+            /* unparseable — retry, then fall through */
+          }
+        }
+      }
+      // Both attempts failed to yield usable JSON.
+      return NextResponse.json({
+        data: { type: 'reply', text: "Sorry, I didn't quite catch that — could you rephrase?" },
+      })
+    }
     const content = await chatCompletion(messages)
     return NextResponse.json({ content })
   } catch (e) {

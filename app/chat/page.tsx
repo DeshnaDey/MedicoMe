@@ -11,7 +11,7 @@ import {
 import { findSymptom, SYMPTOMS } from '@/lib/triage'
 import { directionsLink, findDoctorsForSpecialty, phoneLink } from '@/lib/doctors'
 import { useRequireAuth } from '@/lib/auth'
-import type { ChatMessage, ChatSession, Diagnosis, MedicalRecord } from '@/lib/types'
+import type { ChatMessage, ChatSession, Diagnosis, MedicalRecord, Severity } from '@/lib/types'
 import {
   AlertTriangle,
   CalendarCheck,
@@ -56,8 +56,9 @@ function buildSystemPrompt(args: {
   pastSessions: ChatSession[]
   currentSymptom?: string
   currentDiagnosis?: Diagnosis
+  askedCount: number
 }) {
-  const { patientName, records, pastSessions, currentSymptom, currentDiagnosis } = args
+  const { patientName, records, pastSessions, currentSymptom, currentDiagnosis, askedCount } = args
   const tags = Array.from(new Set(records.flatMap((r) => r.tags)))
   const conditions = records
     .filter((r) => r.category === 'diagnosis')
@@ -86,8 +87,7 @@ function buildSystemPrompt(args: {
     .join('\n')
 
   return `You are Medico Me, a personal medical triage assistant for ${patientName || 'the patient'}.
-You reason carefully, are honest about uncertainty, and always remind the user you are not a substitute for a clinician.
-Respond concisely (≤150 words unless the question explicitly asks for depth). No markdown headers. Plain sentences and short lists only.
+You conduct an INTERACTIVE triage: ask focused follow-up questions ONE AT A TIME, then give a short assessment. You are honest about uncertainty and never replace a clinician.
 
 PATIENT PROFILE
 Tags from their records: ${tags.join(', ') || '(none)'}
@@ -110,9 +110,26 @@ ${
     ? `Rule-based suggestion: ${currentDiagnosis.condition} (${currentDiagnosis.severity}). Rationale: ${currentDiagnosis.rationale}`
     : ''
 }
+Follow-up questions you have already asked this conversation: ${askedCount}.
 
-SAFETY
-If the user describes red-flag symptoms (chest pressure radiating to arm/jaw, trouble breathing, confusion, sudden severe headache, fainting, uncontrolled bleeding) — tell them to call emergency services immediately before anything else.`
+RESPONSE FORMAT (follow exactly)
+Reply with a SINGLE valid JSON object and NOTHING else. Use exactly one of these shapes:
+
+1) Ask the next follow-up question — when the user is describing a symptom and you need more detail. Exactly ONE question, with 2–5 short, mutually-exclusive tappable options:
+{"type":"question","question":"<one short question>","options":["<=4 words","<=4 words"]}
+
+2) Give your assessment — once you have enough detail:
+{"type":"summary","condition":"<short label>","severity":"mild|moderate|severe","rationale":"<1-2 plain sentences>","homeRemedies":["<tip>"],"otc":["<option>"],"seeDoctor":true,"specialty":"<one of: General Physician, Dermatologist, Cardiologist, Neurologist, Pulmonologist, Gastroenterologist>"}
+
+3) Answer a general (non-symptom) question — e.g. about their records or medications:
+{"type":"reply","text":"<plain-sentence answer>"}
+
+RULES
+- Exactly ONE question per "question" response — never bundle multiple questions into one.
+- ${askedCount >= 3 ? 'You have already asked enough questions — you MUST return a "summary" now, not another question.' : 'Aim for 2–4 questions total, then summarize.'}
+- In "summary": include homeRemedies and otc only for mild/moderate; for severe set "seeDoctor":true and choose the most relevant specialty.
+- Emergencies (crushing or severe chest pain, trouble breathing, fainting, stroke signs, uncontrolled bleeding, sudden severe headache): immediately return a "summary" with "severity":"severe", "seeDoctor":true, and a rationale telling them to call emergency services right away.
+- Output ONLY the JSON object — no prose, no markdown, no code fences.`
 }
 
 export default function ChatPage() {
@@ -243,9 +260,92 @@ export default function ChatPage() {
     setMode({ kind: 'idle' })
   }
 
-  // Free-text send — routed to Ollama with full context baked into the system prompt.
-  // Returns false if the message couldn't be sent (e.g. session expired) so the
-  // composer can restore the user's text instead of silently dropping it.
+  // Render a structured /api/chat turn as chat cards. A typed symptom now drives
+  // the SAME interactive UI as the rule-based flow: one question with tappable
+  // options at a time, then a diagnosis + (home-care | doctor) card.
+  const renderAiTurn = async (
+    s: ChatSession,
+    payload: { data?: Record<string, unknown> | null; content?: string }
+  ) => {
+    const data = payload?.data
+    // Not structured / unparseable → plain text bubble (graceful fallback).
+    if (!data || typeof data !== 'object') {
+      await appendMessage(s.id, { role: 'assistant', content: payload?.content ?? '(no response)' })
+      return
+    }
+
+    if (data.type === 'question' && Array.isArray(data.options) && data.options.length > 0) {
+      const question = String(data.question ?? 'Could you tell me a bit more?')
+      await appendMessage(s.id, {
+        role: 'assistant',
+        content: question,
+        card: {
+          type: 'question',
+          symptom: s.symptoms[s.symptoms.length - 1] ?? 'your symptom',
+          question,
+          options: (data.options as unknown[]).map(String).slice(0, 5),
+          source: 'ai',
+        },
+      })
+      return
+    }
+
+    if (data.type === 'summary' && data.condition) {
+      const sev = data.severity
+      const severity: Severity = sev === 'mild' || sev === 'moderate' || sev === 'severe' ? sev : 'moderate'
+      const dx: Diagnosis = {
+        condition: String(data.condition),
+        severity,
+        confidence: 'medium',
+        homeRemedies: Array.isArray(data.homeRemedies) ? data.homeRemedies.map(String) : undefined,
+        otc: Array.isArray(data.otc) ? data.otc.map(String) : undefined,
+        specialty: data.specialty ? String(data.specialty) : undefined,
+        rationale: String(data.rationale ?? ''),
+      }
+      await patchChatSession(s.id, {
+        diagnosis: dx,
+        status: severity === 'severe' ? 'specialist_referred' : 'home_care',
+        endedAt: new Date().toISOString(),
+      })
+      await appendMessage(s.id, {
+        role: 'assistant',
+        content: `Based on what you described: ${dx.condition} (${dx.severity}).${dx.rationale ? `\n${dx.rationale}` : ''}`,
+      })
+      const wantsDoctor = data.seeDoctor === true || severity === 'severe'
+      if (wantsDoctor && dx.specialty) {
+        const doctors = findDoctorsForSpecialty(dx.specialty, state.settings.searchRadiusKm)
+        await appendMessage(s.id, {
+          role: 'assistant',
+          content: `I'd recommend seeing a ${dx.specialty}. Here are a few options near you.`,
+          card: { type: 'doctor_list', diagnosis: dx, doctors },
+        })
+      } else {
+        await appendMessage(s.id, {
+          role: 'assistant',
+          content: 'Here are some home-care suggestions and OTC options.',
+          card: { type: 'home_care', diagnosis: dx },
+        })
+        await appendMessage(s.id, {
+          role: 'assistant',
+          content: 'Need to pick up OTC meds? I can point you to the nearest pharmacy.',
+          card: { type: 'pharmacy', mapsQuery: `pharmacy within ${state.settings.searchRadiusKm}km` },
+        })
+      }
+      return
+    }
+
+    // type === 'reply' or anything unexpected → plain answer. Never render an
+    // empty bubble — fall back to a friendly nudge.
+    const text = String(data.text ?? data.question ?? payload?.content ?? '').trim()
+    await appendMessage(s.id, {
+      role: 'assistant',
+      content: text || "Sorry, I didn't quite catch that — could you rephrase?",
+    })
+  }
+
+  // Free-text send — routed to the structured /api/chat triage. Returns false if
+  // the message couldn't be sent (e.g. session expired) so the composer can
+  // restore the user's text instead of silently dropping it.
   const sendFreeText = async (text: string): Promise<boolean> => {
     const msg = text.trim()
     if (!msg || loading) return false
@@ -261,12 +361,18 @@ export default function ChatPage() {
     setLoading(true)
     try {
       const past = state.chatSessions.filter((cs) => cs.id !== s.id)
+      // How many AI follow-ups we've already asked — the prompt uses this to
+      // stop asking and summarize after a few rounds.
+      const askedCount = s.messages.filter(
+        (m) => m.card?.type === 'question' && m.card.source === 'ai'
+      ).length
       const system = buildSystemPrompt({
         patientName: state.settings.patientName,
         records: state.records,
         pastSessions: past,
         currentSymptom: s.symptoms[s.symptoms.length - 1],
         currentDiagnosis: s.diagnosis,
+        askedCount,
       })
 
       const convo: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
@@ -281,21 +387,19 @@ export default function ChatPage() {
         { role: 'user', content: msg },
       ]
 
-      // Hit our own server-side proxy (same origin, session cookie sent
-      // automatically). The proxy holds the AI key and talks to the provider,
-      // so nothing sensitive is exposed to the browser.
+      // Hit our own server-side proxy in structured mode — it returns a JSON
+      // object we render as interactive cards. The key stays server-side.
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: convo }),
+        body: JSON.stringify({ messages: convo, structured: true }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => null)
         throw new Error(err?.error ?? `Server responded ${res.status}`)
       }
-      const data = await res.json()
-      const content = data?.content ?? '(no response)'
-      await appendMessage(s.id, { role: 'assistant', content })
+      const payload = await res.json()
+      await renderAiTurn(s, payload)
     } catch (e) {
       const reason = e instanceof Error ? e.message : 'unknown error'
       await appendMessage(s.id, {
@@ -307,6 +411,17 @@ export default function ChatPage() {
       scrollBottom()
     }
     return true
+  }
+
+  // Route a tapped option chip. AI-generated questions continue the LLM
+  // conversation (send the choice as the next message); rule-based questions
+  // advance the deterministic question tree.
+  const handleAnswer = (answer: string, msg: ChatMessage) => {
+    if (msg.card?.type === 'question' && msg.card.source === 'ai') {
+      sendFreeText(answer)
+    } else {
+      answerTriage(answer)
+    }
   }
 
   const newConvo = async () => {
@@ -460,7 +575,7 @@ export default function ChatPage() {
             )}
 
             {session?.messages.map((m) => (
-              <MessageBubble key={m.id} msg={m} onAnswer={answerTriage} />
+              <MessageBubble key={m.id} msg={m} onAnswer={handleAnswer} />
             ))}
 
             {loading && (
@@ -573,7 +688,7 @@ const Composer = memo(function Composer({
 })
 
 // ── Message rendering ──────────────────────────────────────────────────────
-function MessageBubble({ msg, onAnswer }: { msg: ChatMessage; onAnswer: (a: string) => void }) {
+function MessageBubble({ msg, onAnswer }: { msg: ChatMessage; onAnswer: (a: string, msg: ChatMessage) => void }) {
   const isUser = msg.role === 'user'
   const alignment = isUser ? 'justify-end' : 'justify-start'
 
@@ -586,7 +701,7 @@ function MessageBubble({ msg, onAnswer }: { msg: ChatMessage; onAnswer: (a: stri
             {msg.card.options.map((o) => (
               <button
                 key={o}
-                onClick={() => onAnswer(o)}
+                onClick={() => onAnswer(o, msg)}
                 className="chip text-xs px-3 py-1.5 rounded-full"
               >
                 {o}
