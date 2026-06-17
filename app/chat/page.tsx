@@ -173,7 +173,7 @@ export default function ChatPage() {
     setSessionId(s.id)
     await appendMessage(s.id, {
       role: 'assistant',
-      content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with? Tap one of the chips below, or describe it in your own words.`,
+      content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with?`,
     })
     return s
   }
@@ -425,7 +425,7 @@ export default function ChatPage() {
     setMode({ kind: 'idle' })
     await appendMessage(s.id, {
       role: 'assistant',
-      content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with? Tap one of the chips below, or describe it in your own words.`,
+      content: `Hi ${state.settings.patientName?.split(' ')[0] || 'there'}! What symptom would you like help with?`,
     })
   }
 
@@ -581,25 +581,6 @@ export default function ChatPage() {
             )}
             <div ref={bottomRef} />
           </div>
-
-          {/* Chip rail when idle */}
-          {session && mode.kind === 'idle' && (
-            <div className="flex gap-2 overflow-x-auto px-4 pb-2 flex-shrink-0">
-              {SYMPTOMS.map((s) => {
-                const Icon = SYMPTOM_ICON[s.id] ?? Stethoscope
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => startSymptom(s.id)}
-                    className="chip whitespace-nowrap text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 flex-shrink-0"
-                  >
-                    <Icon className="w-3 h-3" strokeWidth={1.8} />
-                    {s.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
 
           {/* Input */}
           <div
