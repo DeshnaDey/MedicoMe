@@ -11,7 +11,8 @@ import {
 import { findSymptom, SYMPTOMS } from '@/lib/triage'
 import { directionsLink, findDoctorsForSpecialty, phoneLink } from '@/lib/doctors'
 import { useRequireAuth } from '@/lib/auth'
-import type { ChatMessage, ChatSession, Diagnosis, MedicalRecord, Severity } from '@/lib/types'
+import { interpretTriage } from '@/lib/triage-ai'
+import type { ChatMessage, ChatSession, Diagnosis, MedicalRecord } from '@/lib/types'
 import {
   AlertTriangle,
   CalendarCheck,
@@ -260,64 +261,60 @@ export default function ChatPage() {
     setMode({ kind: 'idle' })
   }
 
-  // Render a structured /api/chat turn as chat cards. A typed symptom now drives
-  // the SAME interactive UI as the rule-based flow: one question with tappable
-  // options at a time, then a diagnosis + (home-care | doctor) card.
+  // Render a structured /api/chat turn as chat cards. A typed symptom drives the
+  // SAME interactive UI as the rule-based flow: one question with tappable
+  // options at a time, then a diagnosis + (home-care | doctor) card. The shape
+  // normalisation lives in interpretTriage() (unit-tested) because gpt-oss
+  // honours the JSON schema loosely.
   const renderAiTurn = async (
     s: ChatSession,
-    payload: { data?: Record<string, unknown> | null; content?: string }
+    payload: { data?: unknown; content?: string }
   ) => {
-    const data = payload?.data
-    // Not structured / unparseable → plain text bubble (graceful fallback).
-    if (!data || typeof data !== 'object') {
-      await appendMessage(s.id, { role: 'assistant', content: payload?.content ?? '(no response)' })
-      return
-    }
+    const result = interpretTriage(payload?.data, payload?.content)
 
-    if (data.type === 'question' && Array.isArray(data.options) && data.options.length > 0) {
-      const question = String(data.question ?? 'Could you tell me a bit more?')
+    if (result.kind === 'question') {
       await appendMessage(s.id, {
         role: 'assistant',
-        content: question,
+        content: result.question,
         card: {
           type: 'question',
           symptom: s.symptoms[s.symptoms.length - 1] ?? 'your symptom',
-          question,
-          options: (data.options as unknown[]).map(String).slice(0, 5),
+          question: result.question,
+          options: result.options,
           source: 'ai',
         },
       })
       return
     }
 
-    if (data.type === 'summary' && data.condition) {
-      const sev = data.severity
-      const severity: Severity = sev === 'mild' || sev === 'moderate' || sev === 'severe' ? sev : 'moderate'
+    if (result.kind === 'summary') {
       const dx: Diagnosis = {
-        condition: String(data.condition),
-        severity,
+        condition: result.condition,
+        severity: result.severity,
         confidence: 'medium',
-        homeRemedies: Array.isArray(data.homeRemedies) ? data.homeRemedies.map(String) : undefined,
-        otc: Array.isArray(data.otc) ? data.otc.map(String) : undefined,
-        specialty: data.specialty ? String(data.specialty) : undefined,
-        rationale: String(data.rationale ?? ''),
+        homeRemedies: result.homeRemedies,
+        otc: result.otc,
+        specialty: result.specialty,
+        rationale: result.rationale,
       }
       await patchChatSession(s.id, {
         diagnosis: dx,
-        status: severity === 'severe' ? 'specialist_referred' : 'home_care',
+        status: result.severity === 'severe' ? 'specialist_referred' : 'home_care',
         endedAt: new Date().toISOString(),
       })
       await appendMessage(s.id, {
         role: 'assistant',
         content: `Based on what you described: ${dx.condition} (${dx.severity}).${dx.rationale ? `\n${dx.rationale}` : ''}`,
       })
-      const wantsDoctor = data.seeDoctor === true || severity === 'severe'
-      if (wantsDoctor && dx.specialty) {
-        const doctors = findDoctorsForSpecialty(dx.specialty, state.settings.searchRadiusKm)
+      // Severe (or model-flagged) cases get a doctor referral; default to a
+      // General Physician if no specialty was named. Otherwise, home care.
+      const specialty = dx.specialty ?? (result.seeDoctor ? 'General Physician' : undefined)
+      if (result.seeDoctor && specialty) {
+        const doctors = findDoctorsForSpecialty(specialty, state.settings.searchRadiusKm)
         await appendMessage(s.id, {
           role: 'assistant',
-          content: `I'd recommend seeing a ${dx.specialty}. Here are a few options near you.`,
-          card: { type: 'doctor_list', diagnosis: dx, doctors },
+          content: `I'd recommend seeing a ${specialty}. Here are a few options near you.`,
+          card: { type: 'doctor_list', diagnosis: { ...dx, specialty }, doctors },
         })
       } else {
         await appendMessage(s.id, {
@@ -334,13 +331,8 @@ export default function ChatPage() {
       return
     }
 
-    // type === 'reply' or anything unexpected → plain answer. Never render an
-    // empty bubble — fall back to a friendly nudge.
-    const text = String(data.text ?? data.question ?? payload?.content ?? '').trim()
-    await appendMessage(s.id, {
-      role: 'assistant',
-      content: text || "Sorry, I didn't quite catch that — could you rephrase?",
-    })
+    // Plain reply (general question, or graceful fallback from interpretTriage).
+    await appendMessage(s.id, { role: 'assistant', content: result.text })
   }
 
   // Free-text send — routed to the structured /api/chat triage. Returns false if

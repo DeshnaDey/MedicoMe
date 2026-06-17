@@ -13,6 +13,24 @@ import { chatCompletion, TRIAGE_SCHEMA, type ChatTurn } from '@/lib/server/ai'
 
 const VALID_ROLES = new Set(['system', 'user', 'assistant'])
 
+// Pull a JSON object out of the model's reply: strip ```json fences, then take
+// the outermost { … }. Returns null if there's nothing parseable.
+function extractJsonObject(raw: string): Record<string, unknown> | null {
+  if (!raw || !raw.trim()) return null
+  let s = raw.trim()
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) s = fence[1].trim()
+  const start = s.indexOf('{')
+  const end = s.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    const obj = JSON.parse(s.slice(start, end + 1))
+    return obj && typeof obj === 'object' ? (obj as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
 export async function POST(req: Request) {
   const { unauthorized } = await requireUser()
   if (unauthorized) return unauthorized
@@ -38,26 +56,18 @@ export async function POST(req: Request) {
 
   try {
     if (structured) {
-      // The triage flow expects a JSON object it can render as cards. Use the
-      // schema to constrain decoding; reasoning models occasionally still emit
-      // empty/garbled output, so retry once before falling back.
+      // The triage flow expects a JSON object the client renders as cards. The
+      // schema keeps content non-empty; gpt-oss still wobbles on exact shape, so
+      // we extract leniently and let the client (interpretTriage) normalise it.
+      // Retry once if the first attempt is empty/unparseable.
+      let lastRaw = ''
       for (let attempt = 0; attempt < 2; attempt++) {
-        const raw = await chatCompletion(messages, { schema: TRIAGE_SCHEMA })
-        if (raw && raw.trim()) {
-          try {
-            const data = JSON.parse(raw)
-            if (data && typeof data === 'object' && 'type' in data) {
-              return NextResponse.json({ data })
-            }
-          } catch {
-            /* unparseable — retry, then fall through */
-          }
-        }
+        lastRaw = await chatCompletion(messages, { schema: TRIAGE_SCHEMA })
+        const data = extractJsonObject(lastRaw)
+        if (data) return NextResponse.json({ data })
       }
-      // Both attempts failed to yield usable JSON.
-      return NextResponse.json({
-        data: { type: 'reply', text: "Sorry, I didn't quite catch that — could you rephrase?" },
-      })
+      // Couldn't parse JSON — hand the raw text to the client as a reply.
+      return NextResponse.json({ content: lastRaw })
     }
     const content = await chatCompletion(messages)
     return NextResponse.json({ content })
