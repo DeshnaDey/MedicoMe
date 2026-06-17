@@ -150,6 +150,27 @@ export async function updateEvent(_id: string, _patch: Partial<CalendarEvent>) {
   throw new Error('updateEvent is not implemented on the server yet.')
 }
 
+// ─── Account ───────────────────────────────────────────────────────────────
+// Updates fields on the User row (e.g. phone), as opposed to updateSettings
+// which owns the Settings row. Returns a result so the caller can surface
+// validation errors (e.g. an invalid phone number).
+export async function updateAccount(
+  patch: { phone?: string }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch('/api/account', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    return { ok: false, error: data.error ?? 'Could not update your profile.' }
+  }
+  await refresh()
+  return { ok: true }
+}
+
 // ─── Settings ──────────────────────────────────────────────────────────────
 export async function updateSettings(patch: Partial<Settings>) {
   await fetch('/api/settings', {

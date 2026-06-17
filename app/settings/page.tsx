@@ -2,26 +2,33 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import NavBar from '@/components/NavBar'
-import { logout, resetToSeed, updateSettings, useAppState } from '@/lib/store'
+import { logout, resetToSeed, updateAccount, updateSettings, useAppState } from '@/lib/store'
 import { useRequireAuth } from '@/lib/auth'
-import { AlertTriangle, LogOut, RotateCcw, User } from 'lucide-react'
+import { AlertTriangle, LogOut, Phone, RotateCcw, User } from 'lucide-react'
 
 export default function SettingsPage() {
   useRequireAuth()
   const router = useRouter()
   const state = useAppState()
   const [form, setForm] = useState(state.settings)
+  const [phone, setPhone] = useState(state.account?.phone ?? '')
   const [toast, setToast] = useState('')
 
   useEffect(() => setForm(state.settings), [state.settings])
+  useEffect(() => setPhone(state.account?.phone ?? ''), [state.account?.phone])
 
   const showToast = (m: string) => {
     setToast(m)
     setTimeout(() => setToast(''), 2200)
   }
 
-  const save = () => {
+  const save = async () => {
     updateSettings(form)
+    const res = await updateAccount({ phone })
+    if (!res.ok) {
+      showToast(res.error)
+      return
+    }
     showToast('Settings saved')
   }
 
@@ -44,7 +51,7 @@ export default function SettingsPage() {
         <div className="pt-8 md:pt-4 mb-6">
           <h2 className="font-display text-[32px] md:text-[36px]" style={{ color: 'var(--text)' }}>Settings</h2>
           <p className="text-sm mt-1" style={{ color: 'var(--text-3)' }}>
-            Everything runs in your browser — nothing leaves this device.
+            Manage your profile and how Medico Me works.
           </p>
         </div>
 
@@ -70,6 +77,24 @@ export default function SettingsPage() {
           />
           <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>
             Used for the greeting on the dashboard and in the chat system prompt.
+          </p>
+
+          <label className="block text-[10px] uppercase tracking-[0.08em] mt-5 mb-1.5 font-medium" style={{ color: 'var(--text-3)' }}>
+            Phone
+          </label>
+          <div className="relative">
+            <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-4)' }} strokeWidth={1.8} />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+1 555 123 4567"
+              autoComplete="tel"
+              className="input-field w-full rounded-xl pl-10 pr-4 py-3 text-sm"
+            />
+          </div>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>
+            The contact number on your account. Leave blank to remove it.
           </p>
 
           {state.account && (
@@ -133,7 +158,7 @@ export default function SettingsPage() {
             <h3 className="font-display text-[18px]" style={{ color: 'var(--text)' }}>Reset data</h3>
           </div>
           <p className="text-sm mb-4" style={{ color: 'var(--text-3)' }}>
-            Wipes the localStorage copy of your records, events, and chat sessions. The prototype will restart fresh.
+            Permanently deletes your records, events, and chat sessions from your account. This can&rsquo;t be undone.
           </p>
           <button
             type="button"
@@ -153,7 +178,10 @@ export default function SettingsPage() {
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => setForm(state.settings)}
+            onClick={() => {
+              setForm(state.settings)
+              setPhone(state.account?.phone ?? '')
+            }}
             className="btn-secondary flex-1 py-3 rounded-xl text-sm font-medium"
           >
             Discard changes
