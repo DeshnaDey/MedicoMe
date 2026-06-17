@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NavBar from '@/components/NavBar'
 import {
   appendMessage,
@@ -120,7 +120,6 @@ export default function ChatPage() {
   const state = useAppState()
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<Mode>({ kind: 'idle' })
-  const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -245,13 +244,14 @@ export default function ChatPage() {
   }
 
   // Free-text send — routed to Ollama with full context baked into the system prompt.
-  const sendFreeText = async (text?: string) => {
-    const msg = (text ?? input).trim()
-    if (!msg || loading) return
-    setInput('')
+  // Returns false if the message couldn't be sent (e.g. session expired) so the
+  // composer can restore the user's text instead of silently dropping it.
+  const sendFreeText = async (text: string): Promise<boolean> => {
+    const msg = text.trim()
+    if (!msg || loading) return false
 
     const s = await ensureSession()
-    if (!s) return
+    if (!s) return false
     if (!s.title || s.title === 'New conversation') {
       await patchChatSession(s.id, { title: msg.slice(0, 40) })
     }
@@ -306,13 +306,7 @@ export default function ChatPage() {
       setLoading(false)
       scrollBottom()
     }
-  }
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendFreeText()
-    }
+    return true
   }
 
   const newConvo = async () => {
@@ -503,29 +497,15 @@ export default function ChatPage() {
             className="flex-shrink-0 p-4"
             style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)' }}
           >
-            <div className="flex items-end gap-3 max-w-3xl mx-auto">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                rows={1}
-                onKeyDown={onKeyDown}
-                placeholder={
-                  mode.kind === 'triage'
-                    ? 'Tap an option above, or type a custom answer…'
-                    : 'Ask about your symptoms, records, or medications…'
-                }
-                className="input-field flex-1 rounded-2xl px-4 py-3 text-sm resize-none"
-                style={{ maxHeight: '120px' }}
-              />
-              <button
-                onClick={() => sendFreeText()}
-                disabled={loading || !input.trim()}
-                className="btn-primary w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
-                aria-label="Send"
-              >
-                <Send className="w-4 h-4" strokeWidth={2} />
-              </button>
-            </div>
+            <Composer
+              onSend={sendFreeText}
+              loading={loading}
+              placeholder={
+                mode.kind === 'triage'
+                  ? 'Tap an option above, or type a custom answer…'
+                  : 'Ask about your symptoms, records, or medications…'
+              }
+            />
             <p className="text-[11px] text-center mt-2" style={{ color: 'var(--text-4)' }}>
               Not medical advice — always consult a clinician for serious concerns.
             </p>
@@ -535,6 +515,62 @@ export default function ChatPage() {
     </div>
   )
 }
+
+// ── Composer ───────────────────────────────────────────────────────────────
+// The message input lives in its own component so that typing only re-renders
+// this small box — not the whole chat tree (navbar, sidebar, every message
+// bubble). Keeping the text in the parent made each keystroke re-render the
+// entire conversation, which on long chats / slower devices caused visible lag
+// and dropped characters. `memo` also shields it from parent re-renders (e.g.
+// when an assistant message streams in).
+const Composer = memo(function Composer({
+  onSend,
+  loading,
+  placeholder,
+}: {
+  onSend: (text: string) => Promise<boolean>
+  loading: boolean
+  placeholder: string
+}) {
+  const [text, setText] = useState('')
+
+  const submit = async () => {
+    const t = text.trim()
+    if (!t || loading) return
+    setText('') // optimistic clear — feels responsive
+    const ok = await onSend(t)
+    if (!ok) setText(t) // restore if the send couldn't go through
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit()
+    }
+  }
+
+  return (
+    <div className="flex items-end gap-3 max-w-3xl mx-auto">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={1}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className="input-field flex-1 rounded-2xl px-4 py-3 text-sm resize-none"
+        style={{ maxHeight: '120px' }}
+      />
+      <button
+        onClick={submit}
+        disabled={loading || !text.trim()}
+        className="btn-primary w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+        aria-label="Send"
+      >
+        <Send className="w-4 h-4" strokeWidth={2} />
+      </button>
+    </div>
+  )
+})
 
 // ── Message rendering ──────────────────────────────────────────────────────
 function MessageBubble({ msg, onAnswer }: { msg: ChatMessage; onAnswer: (a: string) => void }) {
